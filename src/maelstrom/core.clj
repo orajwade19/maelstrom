@@ -14,15 +14,16 @@
                        [process :as process]]
             [maelstrom.net.checker :as net.checker]
             [maelstrom.workload [broadcast :as broadcast]
-                                [echo :as echo]
-                                [kafka :as kafka]
-                                [g-set :as g-set]
-                                [g-counter :as g-counter]
-                                [pn-counter :as pn-counter]
-                                [lin-kv :as lin-kv]
-                                [txn-list-append :as txn-list-append]
-                                [txn-rw-register :as txn-rw-register]
-                                [unique-ids :as unique-ids]]
+             [echo :as echo]
+             [kafka :as kafka]
+             [g-set :as g-set]
+             [or-set :as or-set]
+             [g-counter :as g-counter]
+             [pn-counter :as pn-counter]
+             [lin-kv :as lin-kv]
+             [txn-list-append :as txn-list-append]
+             [txn-rw-register :as txn-rw-register]
+             [unique-ids :as unique-ids]]
             [jepsen [checker :as checker]
                     [cli :as cli]
                     [core :as core]
@@ -39,6 +40,7 @@
    :echo            echo/workload
    :kafka           kafka/workload
    :g-set           g-set/workload
+   :or-set          or-set/workload
    :g-counter       g-counter/workload
    :pn-counter      pn-counter/workload
    :lin-kv          lin-kv/workload
