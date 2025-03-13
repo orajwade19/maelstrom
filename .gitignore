@@ -20,3 +20,5 @@ store/
 .idea
 /demo/rust/target
 __pycache__/
+.clj-kondo/
+.lsp/

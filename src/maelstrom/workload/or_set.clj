@@ -11,22 +11,29 @@
             [slingshot.slingshot :refer [try+ throw+]]
             [jepsen.generator :as gen]))
 
+;; Append-only log for storing event IDs
+(def event-log (atom []))
 
+(defn store-event! [event-id operation element]
+  "Stores the event_id along with operation details."
+  (swap! event-log conj {:event_id event-id
+                         :operation operation
+                         :element element}))
 
 
 (c/defrpc add!
-  "Requests that a server add a single element to the set. Acknowledged by an
-  `add_ok` message."
+  "Requests that a server add a single element to the set."
   {:type    (s/eq "add")
    :element s/Any}
-  {:type    (s/eq "add_ok")})
+  {:type    (s/eq "add_ok")
+   :event_id s/Str}) ;; Ensure event_id is part of response
 
 (c/defrpc delete!
-  "Requests that a server delete a single element from the set. Acknowledged by a
-  `delete_ok` message."
+  "Requests that a server delete a single element from the set."
   {:type    (s/eq "delete")
    :element s/Any}
-  {:type    (s/eq "delete_ok")})
+  {:type    (s/eq "delete_ok")
+   :event_id s/Str}) ;; Ensure event_id is part of response
 
 (c/defrpc read
   "Requests the current set of all elements. Servers respond with a message
@@ -48,14 +55,17 @@
 
      (invoke! [_ test op]
        (case (:f op)
-         :add (do (add! conn node {:element (:value op)})
-                  (assoc op :type :ok))
-
+         :add (let [resp (add! conn node {:element (:value op)})]
+                (when-let [event-id (:event_id resp)] ;; Extract event_id if present
+                  (store-event! event-id "add" (:value op)))
+                (assoc op :type :ok))
          :read (assoc op
                       :type :ok
                       :value (:value (read conn node {})))
-         :delete (do (delete! conn node {:element (:value op)})
-                  (assoc op :type :ok))))
+         :delete (let [resp (delete! conn node {:element (:value op)})]
+                   (when-let [event-id (:event_id resp)] ;; Extract event_id if present
+                     (store-event! event-id "delete" (:value op)))
+                   (assoc op :type :ok))))
 
      (teardown! [_ test])
 
@@ -70,8 +80,8 @@
   [opts]
   {:client    (client (:net opts))
    :generator (gen/then (gen/mix [(->> (range) (map (fn [x] {:f :delete, :value x})))
-                        (repeat {:f :read})])
-                          (gen/mix [(->> (take 10 (range)) (map (fn [x] {:f :add, :value x})))
-                                    (take 20 (repeat {:f :read}))]))
+                                  (repeat {:f :read})])
+                        (gen/mix [(->> (take 10 (range)) (map (fn [x] {:f :add, :value x})))
+                                  (take 20 (repeat {:f :read}))]))
    :final-generator (gen/each-thread {:f :read})
    :checker   (checker/unbridled-optimism)})
