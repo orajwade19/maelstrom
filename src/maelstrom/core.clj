@@ -66,17 +66,11 @@
         nemesis-package (nemesis/package {:db       db
                                           :interval (:nemesis-interval opts)
                                           :faults   (:nemesis opts)})
-        generator (->> (if (pos? rate)
-                         (gen/stagger (/ rate) (:generator workload))
-                         (gen/sleep (:time-limit opts)))
-                       (gen/nemesis (:generator nemesis-package))
-                       (gen/time-limit (:time-limit opts)))
+        generator (:generator workload)
         ; If this workload has a final generator, end the nemesis, wait for
         ; recovery, and perform final ops.
         generator (if-let [final (:final-generator workload)]
                     (gen/phases generator
-                                (gen/nemesis (:final-generator nemesis-package))
-                                (gen/log "Waiting for recovery...")
                                 (gen/sleep 10)
                                 (gen/clients final))
                     generator)]
@@ -89,7 +83,7 @@
             :os      (net/jepsen-os net)
             :net     (net/jepsen-net net)
             :db      db
-            :nemesis (:nemesis nemesis-package)
+            :nemesis (:nemesis workload)
             :checker (checker/compose
                        {:perf       (checker/perf
                                       {:nemeses (:perf nemesis-package)})
