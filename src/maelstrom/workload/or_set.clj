@@ -155,6 +155,153 @@
   (let [[part1 part2] (nemesis/split-one (first nodes) nodes)]
     (nemesis/complete-grudge [part1 part2])))
 
+
+
+(defn orset-checker
+  "Checks eventual consistency for an OR-Set (Observed-Remove Set) with
+   awareness of network partitions.
+   
+   During a network partition:
+   - Nodes may have inconsistent views
+   - Reads may contain elements that are added but not visible to all nodes
+   - Delete operations may not affect elements not visible to the node
+   
+   After healing, the system should eventually converge."
+  []
+  (reify checker/Checker
+    (check [this test history opts]
+      (let [; Get all operations including nemesis events
+            ops (vec history)
+
+            ; Find partition start/stop events
+            partition-events (->> ops
+                                  (filter #(and (= :nemesis (:process %))
+                                                (or (= :start (:f %))
+                                                    (= :stop (:f %)))))
+                                  (map #(assoc % :partition? (= :start (:f %)))))
+
+            ; Create timeline of when partitions are active
+            partition-timeline (reduce
+                                (fn [timeline event]
+                                  (conj timeline {:time (:time event)
+                                                  :partition? (:partition? event)}))
+                                []
+                                partition-events)
+
+            ; Sort timeline by time
+            partition-timeline (sort-by :time partition-timeline)
+
+            ; Function to check if a time is during a partition
+            during-partition? (fn [time]
+                                (let [relevant-events (filter #(<= (:time %) time) partition-timeline)
+                                      last-event (last relevant-events)]
+                                  (and last-event (:partition? last-event))))
+
+            ; Get client operations
+            client-ops (filter #(not= :nemesis (:process %)) ops)
+
+            ; Track element state through the history
+            state (reduce
+                   (fn [state op]
+                     (let [process (:process op)
+                           type (:type op)
+                           f (:f op)
+                           value (:value op)
+                           event-id (:event_id op)
+                           during-partition (during-partition? (:time op))]
+                       (case [type f]
+                         ; Add invocation: track pending add
+                         [:invoke :add]
+                         (update state :pending-adds conj value)
+
+                         ; Add completion: track confirmed add and remove from pending
+                         [:ok :add]
+                         (-> state
+                             (update :pending-adds disj value)
+                             (update :added-values conj value)
+                             (update :add-events assoc value event-id))
+
+                         ; Delete invocation: track pending delete
+                         [:invoke :delete]
+                         (update state :pending-deletes conj value)
+
+                         ; Delete completion: track confirmed delete and remove from pending
+                         [:ok :delete]
+                         (let [; Only mark as deleted if event-id matches and is not empty
+                               valid-delete? (and (string? event-id)
+                                                  (not= "" event-id)
+                                                  (= event-id (get (:add-events state) value)))]
+                           (-> state
+                               (update :pending-deletes disj value)
+                               (update :delete-ops conj {:time (:time op)
+                                                         :process process
+                                                         :value value
+                                                         :event-id event-id
+                                                         :during-partition during-partition
+                                                         :valid valid-delete?})
+                               (update :deleted-values
+                                       (if valid-delete?
+                                         #(conj % value)
+                                         identity))))
+
+                         ; Read completion: record what was read
+                         [:ok :read]
+                         (update state :reads conj {:time (:time op)
+                                                    :process process
+                                                    :values (set value)
+                                                    :during-partition during-partition})
+
+                         ; Default: return state unchanged
+                         state)))
+                   {:pending-adds #{}
+                    :pending-deletes #{}
+                    :added-values #{}
+                    :deleted-values #{}
+                    :add-events {}
+                    :delete-ops []
+                    :reads []}
+                   client-ops)
+
+            ; Get the last reads during non-partition times for each node
+            final-reads (->> (:reads state)
+                             (filter (comp not :during-partition))
+                             (sort-by :time)
+                             (group-by :process)
+                             (map (fn [[node reads]] [node (last reads)]))
+                             (into {}))
+
+            ; Extract just the values from the final reads
+            final-values-by-node (into {}
+                                       (map (fn [[node read]]
+                                              [node (if read (:values read) #{})])
+                                            final-reads))
+
+            ; Check if all final non-partition reads are consistent
+            reads-consistent? (= 1 (count (distinct (vals final-values-by-node))))
+
+            ; Get the set of values after the final accepted delete operation
+            final-deleted-values (:deleted-values state)
+            final-added-values (:added-values state)
+            expected-final-set (clojure.set/difference final-added-values final-deleted-values)
+
+            ; Check if there are any valid final reads
+            has-final-reads? (not-empty final-values-by-node)
+
+            ; The test is valid if readings are consistent after healing
+            ; or if there are no final reads to check
+            valid? (or reads-consistent? (not has-final-reads?))]
+
+        {:valid? valid?
+         :reads-consistent reads-consistent?
+         :expected-final-set expected-final-set
+         :final-values-by-node final-values-by-node
+         :partition-timeline partition-timeline
+         :all-events {:added final-added-values
+                      :deleted final-deleted-values
+                      :deletion-operations (:delete-ops state)
+                      :reads-during-partition (filter :during-partition (:reads state))
+                      :reads-after-healing (filter (comp not :during-partition) (:reads state))}
+         :debug {:all-reads (:reads state)}}))))
 (defn workload
   "Constructs a workload for a grow-only set, given options from the CLI
   test constructor:
@@ -165,4 +312,4 @@
    :nemesis (nemesis/partitioner isolate-node-0)
    :generator (orset-partition-test-generator)
    :final-generator (gen/each-thread {:f :read})
-   :checker   (checker/unbridled-optimism)})
+   :checker   (orset-checker)})
