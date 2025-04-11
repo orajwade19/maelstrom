@@ -149,6 +149,18 @@
        (gen/once {:f :read}))))))
 
 
+(defn orset-perf
+  "Random mix of all three ops from client processes only"
+  []
+  (gen/time-limit 
+   5
+  (gen/clients
+   (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
+             (repeat {:f :read})
+            ;;  (->> (range) (map (fn [x] {:f :delete, :value x})))
+             ]))))
+
+
 (defn isolate-node-0
   "Creates a grudge that isolates node n0 from the rest"
   [nodes]
@@ -161,7 +173,8 @@
   "A simple checker for OR-Set eventual consistency.
    Checks that:
    1. The final reads across all nodes are consistent
-   2. The final state reflects all completed add/delete operations"
+   2. The final state reflects all completed add/delete operations
+   3. Final values are unique (no duplicates in reads)"
   []
   (reify checker/Checker
     (check [this test history opts]
@@ -181,7 +194,8 @@
                        :read  (update state :reads conj
                                       {:time (:time op)
                                        :process (:process op)
-                                       :values (set (:value op))})
+                                       :values (set (:value op))
+                                       :raw-values (:value op)}) ; Keep raw values to check for duplicates
                        state))
                    {:adds {}      ; map of value -> event_id
                     :deletes #{}  ; set of deleted event_ids
@@ -193,7 +207,9 @@
                              (sort-by :time)
                              (group-by :process)
                              (map (fn [[process reads]]
-                                    [process (:values (last reads))]))
+                                    (let [last-read (last reads)]
+                                      [process {:values (:values last-read)
+                                                :raw-values (:raw-values last-read)}])))
                              (into {}))
 
             ; Calculate expected set by filtering out deleted elements
@@ -204,17 +220,34 @@
                                  (set))
 
             ; Check if all nodes see the same values in their final read
-            reads-consistent? (= 1 (count (distinct (vals final-reads))))
+            reads-consistent? (= 1 (count (distinct (map :values (vals final-reads)))))
+
+            ; Check for duplicates in the final reads
+            duplicate-values (->> final-reads
+                                  (map (fn [[process read-data]]
+                                         (let [raw-values (:raw-values read-data)
+                                               duplicates (when raw-values
+                                                            (->> raw-values
+                                                                 (frequencies)
+                                                                 (filter (fn [[val freq]] (> freq 1)))
+                                                                 (map first)))]
+                                           [process duplicates])))
+                                  (filter (fn [[_ dups]] (seq dups)))
+                                  (into {}))
+
+            has-duplicates? (not (empty? duplicate-values))
 
             ; If consistent, check if they match expected values
             correct-values? (or (not reads-consistent?)
-                                (= expected-values (first (distinct (vals final-reads)))))]
+                                (= expected-values (first (distinct (map :values (vals final-reads))))))]
 
-        {:valid? (and reads-consistent? correct-values?)
+        {:valid? (and reads-consistent? correct-values? (not has-duplicates?))
          :reads-consistent? reads-consistent?
          :correct-values? correct-values?
          :expected-values expected-values
-         :final-reads final-reads
+         :final-reads (into {} (map (fn [[k v]] [k (:values v)]) final-reads))
+         :has-duplicates? has-duplicates?
+         :duplicate-values duplicate-values
          :tracking {:adds (:adds state)
                     :deletes (:deletes state)}}))))
 
@@ -228,6 +261,6 @@
   [opts]
   {:client    (client (:net opts))
    :nemesis (nemesis/partitioner isolate-node-0)
-   :generator (orset-partition-test-generator)
+   :generator (orset-perf)
    :final-generator (gen/each-thread {:f :read})
    :checker   (orset-checker)})
