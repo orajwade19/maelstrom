@@ -1,4 +1,4 @@
-(ns maelstrom.workload.or-set
+(ns maelstrom.workload.or-set-perf
   "A grow-only set workload: clients add elements to a set, and read the
   current value of the set."
   (:refer-clojure :exclude [read])
@@ -47,25 +47,25 @@
 
      (setup! [this test])
 
-(invoke! [_ test op]
-         (case (:f op)
-           :add (let [resp (add! conn node {:element (:value op)})
-                      op (assoc op :type :ok)
-                      op (if-let [event_id (:event_id resp)]
-                           (assoc op :event_id event_id)
-                           op)]
-                  op)
+     (invoke! [_ test op]
+       (case (:f op)
+         :add (let [resp (add! conn node {:element (:value op)})
+                    op (assoc op :type :ok)
+                    op (if-let [event_id (:event_id resp)]
+                         (assoc op :event_id event_id)
+                         op)]
+                op)
 
-           :read (assoc op
-                        :type :ok
-                        :value (:value (read conn node {})))
+         :read (assoc op
+                      :type :ok
+                      :value (:value (read conn node {})))
 
-           :delete (let [resp (delete! conn node {:element (:value op)})
-                         op (assoc op :type :ok)
-                      op (if-let [event_id (:event_id resp)]
-                           (assoc op :event_id event_id)
-                           op)]
-                     op)))
+         :delete (let [resp (delete! conn node {:element (:value op)})
+                       op (assoc op :type :ok)
+                       op (if-let [event_id (:event_id resp)]
+                            (assoc op :event_id event_id)
+                            op)]
+                   op)))
 
      (teardown! [_ test])
 
@@ -73,93 +73,28 @@
        (c/close! conn)))))
 
 
-(defn simple-test-generator []
-  (gen/phases
-   (gen/log "Testing basic operations")
-   (gen/clients
-    (gen/each-process
-     (gen/phases
-      (gen/once {:type :invoke, :f :add, :value 42})
-      (gen/sleep 1)
-      (gen/once {:type :invoke, :f :read})
-      (gen/sleep 1)
-      (gen/once {:type :invoke, :f :delete, :value 42})
-      (gen/sleep 1)
-      (gen/once {:type :invoke, :f :read}))))))
 
-(defn orset-partition-test-generator
-  "Creates a partition test generator for ORSet"
-  []
-  (let [test-value 42]
-    (gen/phases
-
-     (gen/log "Creating network partition - isolating node 0")
-     (gen/nemesis {:type :info, :f :start})
-     (gen/sleep 2)
-      ;; Step 2: Add value to node 0
-     (gen/log "Adding value to node 0")
-     (gen/once {:f :add, :value test-value, :process 0})
-
-      ;; Step 3: Read from node 0
-     (gen/log "Reading from node 0")
-     (gen/once {:f :read, :process 0})
-
-      ;; Step 4: Read from node 1
-     (gen/log "Reading from node 1")
-     (gen/once {:f :read, :process 1})
-
-      ;; Step 5: Delete added value from node 1
-     (gen/log "Deleting value from node 1")
-     (gen/once {:f :delete, :value test-value, :process 1})
-
-      ;; Step 6: Read from node 1
-     (gen/log "Reading from node 1 after delete attempt")
-     (gen/once {:f :read, :process 1})
-
-      ;; Step 7: Read from node 0
-     (gen/log "Reading from node 0 after node 1 delete attempt")
-     (gen/once {:f :read, :process 0})
-
-     ;; Step 8: Heal the network partition
-     (gen/log "Healing network partition")
-     (gen/nemesis {:type :info, :f :stop})
-     (gen/sleep 3)
-
-
-      ;; Wait to ensure nodes synchronize
-     (gen/sleep 3)
-
-      ;; Step 9: Delete added value from node 1 again
-     (gen/log "Deleting value from node 1 after healing")
-    ;;  (gen/once {:f :delete, :value test-value, :process 1})
-
-      ;; Step 10: Read from node 1
-     (gen/log "Reading from node 1 after healing and delete")
-     (gen/once {:f :read, :process 1})
-
-      ;; Step 11: Read from node 0
-     (gen/log "Reading from node 0 after healing and delete")
-     (gen/once {:f :read, :process 0})
-
-      ;; Final verification reads
-     (gen/sleep 2)
-     (gen/log "Verification reads from all nodes")
-     (gen/clients
-      (gen/each-process
-       (gen/once {:f :read}))))))
 
 
 (defn orset-perf
-  "Random mix of all three ops from client processes only"
+  "Random mix of operations with rate control and time limit"
   []
-  (gen/time-limit 
-   5
-  (gen/clients
-   (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
-             (repeat {:f :read})
-            ;;  (->> (range) (map (fn [x] {:f :delete, :value x})))
-             ]))))
+  (let [rate 1000    ; Hardcoded rate
+        time-limit 5]  ; Hardcoded time limit
 
+    (if (pos? rate)
+      ;; If rate is positive, apply staggering to the mix
+      (gen/time-limit
+       time-limit
+       (gen/stagger (/ rate)
+                    (gen/clients
+                     (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
+                               (repeat {:f :read})
+                               ;; (->> (range) (map (fn [x] {:f :delete, :value x})))
+                               ]))))
+
+      ;; Otherwise just sleep for the duration
+      (gen/sleep time-limit))))
 
 (defn isolate-node-0
   "Creates a grudge that isolates node n0 from the rest"
@@ -261,6 +196,6 @@
   [opts]
   {:client    (client (:net opts))
    :nemesis (nemesis/partitioner isolate-node-0)
-   :generator (orset-partition-test-generator)
+   :generator (orset-perf)
    :final-generator (gen/each-thread {:f :read})
    :checker   (orset-checker)})

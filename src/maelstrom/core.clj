@@ -18,6 +18,7 @@
              [kafka :as kafka]
              [g-set :as g-set]
              [or-set :as or-set]
+             [or-set-perf :as or-set-perf]
              [g-counter :as g-counter]
              [pn-counter :as pn-counter]
              [lin-kv :as lin-kv]
@@ -41,6 +42,7 @@
    :kafka           kafka/workload
    :g-set           g-set/workload
    :or-set          or-set/workload
+   :or-set-perf          or-set-perf/workload
    :g-counter       g-counter/workload
    :pn-counter      pn-counter/workload
    :lin-kv          lin-kv/workload
