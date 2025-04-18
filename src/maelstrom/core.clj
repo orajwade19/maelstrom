@@ -42,7 +42,7 @@
    :kafka           kafka/workload
    :g-set           g-set/workload
    :or-set          or-set/workload
-   :or-set-perf          or-set-perf/workload
+   :or-set-perf     or-set-perf/workload
    :g-counter       g-counter/workload
    :pn-counter      pn-counter/workload
    :lin-kv          lin-kv/workload
@@ -68,12 +68,20 @@
         nemesis-package (nemesis/package {:db       db
                                           :interval (:nemesis-interval opts)
                                           :faults   (:nemesis opts)})
-        generator (:generator workload)
+        generator (->> (if (pos? rate)
+                         (gen/stagger (/ rate) (:generator workload))
+                         (gen/sleep (:time-limit opts)))
+                       (gen/nemesis  (if (contains? workload :nemesis)
+                                       (:generator workload)
+                                       (:generator nemesis-package)))
+                       (gen/time-limit (:time-limit opts)))
         ; If this workload has a final generator, end the nemesis, wait for
         ; recovery, and perform final ops.
         generator (if-let [final (:final-generator workload)]
                     (gen/phases generator
-                                (gen/sleep 10)
+                                (gen/nemesis (or (:nemesis-final-generator workload)
+                                                 (:final-generator nemesis-package)))
+                                (gen/sleep (:time-limit opts))
                                 (gen/clients final))
                     generator)]
     (merge tests/noop-test
@@ -85,7 +93,9 @@
             :os      (net/jepsen-os net)
             :net     (net/jepsen-net net)
             :db      db
-            :nemesis (:nemesis workload)
+            :nemesis (if (contains? workload :nemesis)
+                       (:nemesis workload)
+                       (:nemesis nemesis-package))
             :checker (checker/compose
                        {:perf       (checker/perf
                                       {:nemeses (:perf nemesis-package)})
@@ -222,9 +232,7 @@
    [nil "--topology SPEC" "What kind of network topology to offer to nodes, for those workloads (e.g. broadcast) which use one."
     :parse-fn keyword
     :default :grid
-    :validate [broadcast/topologies (cli/one-of broadcast/topologies)]]
-
-   ])
+    :validate [broadcast/topologies (cli/one-of broadcast/topologies)]]])
 
 (defn parse-node-count
   "Takes the node-count option and generates a :nodes list in the parsed option

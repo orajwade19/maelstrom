@@ -79,22 +79,11 @@
 (defn orset-perf
   "Random mix of operations with rate control and time limit"
   []
-  (let [rate 1000    ; Hardcoded rate
-        time-limit 5]  ; Hardcoded time limit
-
-    (if (pos? rate)
-      ;; If rate is positive, apply staggering to the mix
-      (gen/time-limit
-       time-limit
-       (gen/stagger (/ rate)
-                    (gen/clients
-                     (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
-                               (repeat {:f :read})
-                               ;; (->> (range) (map (fn [x] {:f :delete, :value x})))
-                               ]))))
-
-      ;; Otherwise just sleep for the duration
-      (gen/sleep time-limit))))
+  (gen/clients
+   (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
+             (repeat {:f :read})
+             ;; (->> (range) (map (fn [x] {:f :delete, :value x})))
+             ])))
 
 (defn isolate-node-0
   "Creates a grudge that isolates node n0 from the rest"
@@ -195,7 +184,8 @@
       {:net     A Maelstrom network}"
   [opts]
   {:client    (client (:net opts))
-   :nemesis (nemesis/partitioner isolate-node-0)
+   ;;  :nemesis (nemesis/partitioner isolate-node-0)
    :generator (orset-perf)
+   ;;  :nemesis-final-generator (gen/once {:type :info, :f :heal})
    :final-generator (gen/each-thread {:f :read})
    :checker   (orset-checker)})

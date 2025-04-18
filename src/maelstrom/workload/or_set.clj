@@ -261,6 +261,7 @@
   [opts]
   {:client    (client (:net opts))
    :nemesis (nemesis/partitioner isolate-node-0)
-   :generator (orset-partition-test-generator)
+   :generator (orset-partition-test-generator) 
+   :nemesis-final-generator (gen/once {:type :info, :f :heal}) 
    :final-generator (gen/each-thread {:f :read})
    :checker   (orset-checker)})
