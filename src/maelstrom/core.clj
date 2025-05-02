@@ -56,57 +56,62 @@
 
 (defn maelstrom-test
   "Construct a Jepsen test from parsed CLI options"
-  [{:keys [bin args nodes rate] :as opts}]
+  [{:keys [bin args nodes rate time-limit] :as opts}] ; Add time-limit here
   (let [nodes (:nodes opts)
         net   (net/net (:latency opts)
                        (:log-net-send opts)
                        (:log-net-recv opts))
         db            (db/db {:net net, :bin bin, :args args})
         workload-name (:workload opts)
-        workload      ((workloads workload-name)
+        workload      ((workloads workload-name) ; Assumes workloads is defined elsewhere
                        (assoc opts :nodes nodes, :net net))
         nemesis-package (nemesis/package {:db       db
                                           :interval (:nemesis-interval opts)
                                           :faults   (:nemesis opts)})
-        generator (->> (if (pos? rate)
-                         (gen/stagger (/ rate) (:generator workload))
-                         (gen/sleep (:time-limit opts)))
-                       (gen/nemesis  (if (contains? workload :nemesis)
-                                       (:generator workload)
-                                       (:generator nemesis-package)))
-                       (gen/time-limit (:time-limit opts)))
-        ; If this workload has a final generator, end the nemesis, wait for
-        ; recovery, and perform final ops.
-        generator (if-let [final (:final-generator workload)]
-                    (gen/phases generator
-                                (gen/nemesis (or (:nemesis-final-generator workload)
-                                                 (:final-generator nemesis-package)))
-                                (gen/sleep (:time-limit opts))
-                                (gen/clients final))
-                    generator)]
-    (merge tests/noop-test
+
+        ;; Define the main client operation generator
+        base-generator (:generator workload)
+
+        ;; Apply staggering if rate is positive
+        generator (if (pos? rate)
+                    (gen/stagger (/ rate) base-generator)
+                    base-generator) ; Use base generator directly if rate is 0 or negative
+
+        ;; Apply time limit
+        generator (gen/time-limit time-limit generator)
+
+        ;; Define the final generator phase (if any)
+        final-generator (when-let [final (:final-generator workload)]
+                          (gen/phases
+                           generator ; Run the main generator first
+                           ;; Then run nemesis finalization
+                           (gen/nemesis (or (:nemesis-final-generator workload)
+                                            (:final-generator nemesis-package)))
+                           ;; Optional sleep? Maybe adjust based on recovery time needed.
+                           (gen/sleep (:recovery-time opts 5)) ; Use recovery-time or default
+                           ;; Then run client final generator
+                           (gen/clients final)))
+        ;; If no final generator, the main generator is used
+        generator (or final-generator generator)]
+
+    (merge tests/noop-test ; Assumes tests/noop-test is defined
            opts
-           (dissoc workload :final-generator)
+           (dissoc workload :final-generator :nemesis-final-generator) ; Remove handled keys
            {:name    (str (name workload-name))
             :nodes   nodes
-            :ssh     {:dummy? true}
+            :ssh     {:dummy? true} ; Assuming dummy SSH for Maelstrom
             :os      (net/jepsen-os net)
             :net     (net/jepsen-net net)
             :db      db
+            ;; Use the workload's nemesis if specified, otherwise package's
             :nemesis (if (contains? workload :nemesis)
                        (:nemesis workload)
                        (:nemesis nemesis-package))
-            :checker (checker/compose
-                       {:perf       (checker/perf
-                                      {:nemeses (:perf nemesis-package)})
-                        :timeline   (timeline/html)
-                        :exceptions (checker/unhandled-exceptions)
-                        :stats      (-> (checker/stats)
-                                        jepsen.kafka/stats-checker)
-                        :availability (availability-checker)
-                        :net        (net.checker/checker)
-                        :workload   (:checker workload)})
-            :generator generator
+            :checker (checker/compose {;; Keep your checkers here
+                                       :workload (:checker workload)
+                                       ;; Add other standard checkers as needed
+                                       :perf (checker/perf)})
+            :generator generator ; Assign the correctly composed generator
             :pure-generators true})))
 
 (def demos

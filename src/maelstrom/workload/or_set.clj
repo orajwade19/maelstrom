@@ -96,27 +96,27 @@
      (gen/log "Creating network partition - isolating node 0")
      (gen/nemesis {:type :info, :f :start})
      (gen/sleep 2)
-      ;; Step 2: Add value to node 0
+     ;; Step 2: Add value to node 0
      (gen/log "Adding value to node 0")
      (gen/once {:f :add, :value test-value, :process 0})
 
-      ;; Step 3: Read from node 0
+     ;; Step 3: Read from node 0
      (gen/log "Reading from node 0")
      (gen/once {:f :read, :process 0})
 
-      ;; Step 4: Read from node 1
+     ;; Step 4: Read from node 1
      (gen/log "Reading from node 1")
      (gen/once {:f :read, :process 1})
 
-      ;; Step 5: Delete added value from node 1
+     ;; Step 5: Delete added value from node 1
      (gen/log "Deleting value from node 1")
      (gen/once {:f :delete, :value test-value, :process 1})
 
-      ;; Step 6: Read from node 1
+     ;; Step 6: Read from node 1
      (gen/log "Reading from node 1 after delete attempt")
      (gen/once {:f :read, :process 1})
 
-      ;; Step 7: Read from node 0
+     ;; Step 7: Read from node 0
      (gen/log "Reading from node 0 after node 1 delete attempt")
      (gen/once {:f :read, :process 0})
 
@@ -126,22 +126,22 @@
      (gen/sleep 3)
 
 
-      ;; Wait to ensure nodes synchronize
+     ;; Wait to ensure nodes synchronize
      (gen/sleep 3)
 
-      ;; Step 9: Delete added value from node 1 again
+     ;; Step 9: Delete added value from node 1 again
      (gen/log "Deleting value from node 1 after healing")
-    ;;  (gen/once {:f :delete, :value test-value, :process 1})
+     ;;  (gen/once {:f :delete, :value test-value, :process 1})
 
-      ;; Step 10: Read from node 1
+     ;; Step 10: Read from node 1
      (gen/log "Reading from node 1 after healing and delete")
      (gen/once {:f :read, :process 1})
 
-      ;; Step 11: Read from node 0
+     ;; Step 11: Read from node 0
      (gen/log "Reading from node 0 after healing and delete")
      (gen/once {:f :read, :process 0})
 
-      ;; Final verification reads
+     ;; Final verification reads
      (gen/sleep 2)
      (gen/log "Verification reads from all nodes")
      (gen/clients
@@ -261,7 +261,9 @@
   [opts]
   {:client    (client (:net opts))
    :nemesis (nemesis/partitioner isolate-node-0)
-   :generator (orset-partition-test-generator) 
-   :nemesis-final-generator (gen/once {:type :info, :f :heal}) 
-   :final-generator (gen/each-thread {:f :read})
+   :generator (orset-partition-test-generator)
+   :nemesis-final-generator (gen/each-thread {:type :info, :f :stop})
+   :final-generator (gen/clients
+                     (gen/each-process
+                      (gen/once {:f :read})))
    :checker   (orset-checker)})
