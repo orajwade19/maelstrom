@@ -27,7 +27,7 @@
   {:type    (s/eq "delete")
    :element s/Any}
   {:type    (s/eq "delete_ok")
-   :event_id s/Str}) ;; Ensure event_id is part of response
+   :event_id [s/Str]}) ;; Ensure event_id is part of response
 
 (c/defrpc read
   "Requests the current set of all elements. Servers respond with a message

@@ -27,7 +27,7 @@
   {:type    (s/eq "delete")
    :element s/Any}
   {:type    (s/eq "delete_ok")
-   :event_id s/Str}) ;; Ensure event_id is part of response
+   :event_id [s/Str]}) ;; Ensure event_id is part of response
 
 (c/defrpc read
   "Requests the current set of all elements. Servers respond with a message
@@ -47,25 +47,25 @@
 
      (setup! [this test])
 
-(invoke! [_ test op]
-         (case (:f op)
-           :add (let [resp (add! conn node {:element (:value op)})
-                      op (assoc op :type :ok)
-                      op (if-let [event_id (:event_id resp)]
-                           (assoc op :event_id event_id)
-                           op)]
-                  op)
+     (invoke! [_ test op]
+       (case (:f op)
+         :add (let [resp (add! conn node {:element (:value op)})
+                    op (assoc op :type :ok)
+                    op (if-let [event_id (:event_id resp)]
+                         (assoc op :event_id event_id)
+                         op)]
+                op)
 
-           :read (assoc op
-                        :type :ok
-                        :value (:value (read conn node {})))
+         :read (assoc op
+                      :type :ok
+                      :value (:value (read conn node {})))
 
-           :delete (let [resp (delete! conn node {:element (:value op)})
-                         op (assoc op :type :ok)
-                      op (if-let [event_id (:event_id resp)]
-                           (assoc op :event_id event_id)
-                           op)]
-                     op)))
+         :delete (let [resp (delete! conn node {:element (:value op)})
+                       op (assoc op :type :ok)
+                       op (if-let [event_id (:event_id resp)]
+                            (assoc op :event_id event_id)
+                            op)]
+                   op)))
 
      (teardown! [_ test])
 
@@ -152,13 +152,13 @@
 (defn orset-perf
   "Random mix of all three ops from client processes only"
   []
-  (gen/time-limit 
+  (gen/time-limit
    5
-  (gen/clients
-   (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
-             (repeat {:f :read})
-            ;;  (->> (range) (map (fn [x] {:f :delete, :value x})))
-             ]))))
+   (gen/clients
+    (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
+              (repeat {:f :read})
+              ;;  (->> (range) (map (fn [x] {:f :delete, :value x})))
+              ]))))
 
 
 (defn isolate-node-0

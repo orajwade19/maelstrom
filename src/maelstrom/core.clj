@@ -88,7 +88,7 @@
                            (gen/nemesis (or (:nemesis-final-generator workload)
                                             (:final-generator nemesis-package)))
                            ;; Optional sleep? Maybe adjust based on recovery time needed.
-                           (gen/sleep (:recovery-time opts 5)) ; Use recovery-time or default
+                           (gen/sleep (:recovery-time opts 50)) ; Use recovery-time or default
                            ;; Then run client final generator
                            (gen/clients final)))
         ;; If no final generator, the main generator is used
