@@ -19,6 +19,7 @@
              [g-set :as g-set]
              [or-set :as or-set]
              [or-set-perf :as or-set-perf]
+             [or-set-repeat :as or-set-repeat]
              [g-counter :as g-counter]
              [pn-counter :as pn-counter]
              [lin-kv :as lin-kv]
@@ -43,6 +44,7 @@
    :g-set           g-set/workload
    :or-set          or-set/workload
    :or-set-perf     or-set-perf/workload
+   :or-set-repeat     or-set-repeat/workload
    :g-counter       g-counter/workload
    :pn-counter      pn-counter/workload
    :lin-kv          lin-kv/workload
@@ -110,7 +112,14 @@
             :checker (checker/compose {;; Keep your checkers here
                                        :workload (:checker workload)
                                        ;; Add other standard checkers as needed
-                                       :perf (checker/perf)})
+                                       :perf (checker/perf)
+
+                                       :timeline   (timeline/html)
+                                       :exceptions (checker/unhandled-exceptions)
+                                       :stats      (-> (checker/stats)
+                                                       jepsen.kafka/stats-checker)
+                                       :availability (availability-checker)
+                                       :net        (net.checker/checker)})
             :generator generator ; Assign the correctly composed generator
             :pure-generators true})))
 
