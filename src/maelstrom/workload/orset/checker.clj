@@ -23,8 +23,13 @@
                    (fn [state op]
                      (case (:f op)
                        :add   (assoc-in state [:adds (:value op)] (:event_id op))
-                       :delete (if (and (:event_id op) (not= "" (:event_id op)))
-                                 (update state :deletes conj (:event_id op))
+                       :delete (if-let [event-ids (:event_id op)]
+                                 ; Handle event_id as either a single ID or a collection
+                                 (let [event-ids (if (coll? event-ids) event-ids [event-ids])]
+                                   ; Only add non-empty event IDs
+                                   (if (seq event-ids)
+                                     (update state :deletes into event-ids)
+                                     state))
                                  state)
                        :read  (update state :reads conj
                                       {:time (:time op)
