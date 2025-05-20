@@ -21,7 +21,7 @@
   (gen/clients
    (gen/mix [(->> (range) (map (fn [x] {:f :add, :value x})))
              (repeat {:f :read})
-             ;; (->> (range) (map (fn [x] {:f :delete, :value x})))
+             (->> (range) (map (fn [x] {:f :delete, :value x})))
              ])))
 
 (defn workload
